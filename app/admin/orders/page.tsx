@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useState } from "react";
 import { Header } from "@/components/layout/Header";
 import { BottomNav } from "@/components/layout/BottomNav";
 import { Container } from "@/components/ui/Container";
@@ -58,7 +58,7 @@ export default function AdminOrdersPage() {
         .order("id", { ascending: false });
 
       if (ordersError) {
-        console.log("orders load error:", ordersError);
+        console.log(ordersError);
         setOrders([]);
         setLoading(false);
         return;
@@ -69,7 +69,7 @@ export default function AdminOrdersPage() {
         .select("id, order_id, product_id, product_name, quantity, price");
 
       if (itemsError) {
-        console.log("order_items load error:", itemsError);
+        console.log(itemsError);
         setOrders((ordersData as OrderItem[]) || []);
         setLoading(false);
         return;
@@ -100,26 +100,20 @@ export default function AdminOrdersPage() {
 
       setOrders(mergedOrders);
 
-      setCourierDrafts((prev) => {
-        const next = { ...prev };
-
-        mergedOrders.forEach((order) => {
-          if (!next[order.id]) {
-            next[order.id] = {
-              courier_name: order.courier_name || "",
-              courier_phone: order.courier_phone || "",
-              pickup_point: order.pickup_point || "",
-              delivery_note: order.delivery_note || "",
-            };
-          }
-        });
-
-        return next;
+      const nextDrafts: Record<number, CourierDraft> = {};
+      mergedOrders.forEach((order) => {
+        nextDrafts[order.id] = {
+          courier_name: order.courier_name || "",
+          courier_phone: order.courier_phone || "",
+          pickup_point: order.pickup_point || "",
+          delivery_note: order.delivery_note || "",
+        };
       });
+      setCourierDrafts(nextDrafts);
 
       setLoading(false);
     } catch (err) {
-      console.log("loadOrders catch:", err);
+      console.log(err);
       setOrders([]);
       setLoading(false);
     }
@@ -155,10 +149,10 @@ export default function AdminOrdersPage() {
         return false;
       }
 
-      return true;
-    } catch (error: any) {
+      return data.order as OrderItem;
+    } catch (error) {
       console.log("updateOrderByApi error:", error);
-      alert(error?.message || "Status update API xatosi");
+      alert("Status update API xatosi");
       return false;
     }
   };
@@ -227,9 +221,9 @@ export default function AdminOrdersPage() {
       }
 
       return true;
-    } catch (error: any) {
-      console.log("sendCourierTelegramMessage error:", error);
-      alert(error?.message || "API route yoki fetch xatosi bor");
+    } catch (error) {
+      console.log("Telegram fetch error:", error);
+      alert("API route yoki fetch xatosi bor");
       return false;
     }
   };
@@ -339,17 +333,21 @@ export default function AdminOrdersPage() {
         delivery_note: order.delivery_note || "",
       };
 
-      if (!draft.courier_name.trim()) {
+      const courierName = draft.courier_name.trim();
+      const courierPhone = draft.courier_phone.trim();
+      const pickupPoint = draft.pickup_point.trim();
+
+      if (!courierName) {
         alert("Avval kuryer ismini kiriting");
         return;
       }
 
-      if (!draft.courier_phone.trim()) {
+      if (!courierPhone) {
         alert("Avval kuryer telefonini kiriting");
         return;
       }
 
-      if (!draft.pickup_point.trim()) {
+      if (!pickupPoint) {
         alert("Avval qayerdan olib ketishini kiriting");
         return;
       }
@@ -373,7 +371,21 @@ export default function AdminOrdersPage() {
 
       if (!updated) return;
 
-      await loadOrders();
+      setOrders((prev) =>
+        prev.map((item) =>
+          item.id === order.id
+            ? {
+                ...item,
+                order_status: "Kuryerga topshirildi",
+                delivery_status: "Dastavkaga berildi",
+                courier_name: draft.courier_name,
+                courier_phone: draft.courier_phone,
+                pickup_point: draft.pickup_point,
+                delivery_note: draft.delivery_note,
+              }
+            : item
+        )
+      );
     } catch (error) {
       console.log("assignToCourier error:", error);
       alert("Kuryerga yuborishda xato bo‘ldi");
@@ -390,38 +402,18 @@ export default function AdminOrdersPage() {
 
     if (!updated) return;
 
-    await loadOrders();
+    setOrders((prev) =>
+      prev.map((item) =>
+        item.id === order.id
+          ? {
+              ...item,
+              order_status: "Yetkazildi",
+              delivery_status: "Yetkazib berdi",
+            }
+          : item
+      )
+    );
   };
-
-  const newOrders = useMemo(
-    () =>
-      orders.filter(
-        (order) =>
-          order.delivery_status === "Dastavka biriktirilmagan" &&
-          order.order_status !== "Yetkazildi" &&
-          order.order_status !== "Bekor qilindi"
-      ),
-    [orders]
-  );
-
-  const courierOrders = useMemo(
-    () =>
-      orders.filter((order) =>
-        ["Dastavkaga berildi", "Yo‘lda"].includes(order.delivery_status)
-      ),
-    [orders]
-  );
-
-  const finishedOrders = useMemo(
-    () =>
-      orders.filter(
-        (order) =>
-          order.delivery_status === "Yetkazib berdi" ||
-          order.order_status === "Yetkazildi" ||
-          order.order_status === "Bekor qilindi"
-      ),
-    [orders]
-  );
 
   useEffect(() => {
     loadOrders();
@@ -433,259 +425,11 @@ export default function AdminOrdersPage() {
     return () => clearInterval(interval);
   }, []);
 
-  const renderOrderCard = (order: OrderItem) => {
-    const draft = courierDrafts[order.id] || {
-      courier_name: "",
-      courier_phone: "",
-      pickup_point: "",
-      delivery_note: "",
-    };
-
-    const isSending = sendingOrderId === order.id;
-    const courierAlreadySent = isCourierAlreadySent(order);
-    const deliveryBadge = getDeliveryBadge(order.delivery_status);
-    const orderBadge = getOrderBadge(order.order_status);
-
-    return (
-      <div key={order.id} className="rounded-[24px] bg-white p-5 shadow-soft">
-        <div className="flex items-start justify-between gap-3">
-          <div>
-            <p className="text-lg font-bold text-marva-900">
-              #{order.id} — {order.full_name}
-            </p>
-            <p className="mt-1 text-sm text-marva-700/80">{order.phone}</p>
-            <p className="mt-1 text-sm text-marva-700/80">{order.address}</p>
-            {order.note ? (
-              <p className="mt-2 text-sm text-marva-700/80">
-                Mijoz izohi: {order.note}
-              </p>
-            ) : null}
-          </div>
-
-          <div className="text-right">
-            <p className="text-xl font-bold text-marva-900">
-              {formatPrice(order.total_amount)}
-            </p>
-          </div>
-        </div>
-
-        <div className="mt-3 flex flex-wrap gap-2">
-          {orderBadge ? (
-            <div
-              className={`inline-flex items-center rounded-full px-3 py-1 text-xs font-semibold ${orderBadge.className}`}
-            >
-              {orderBadge.label}
-            </div>
-          ) : null}
-
-          {deliveryBadge ? (
-            <div
-              className={`inline-flex items-center rounded-full px-3 py-1 text-xs font-semibold ${deliveryBadge.className}`}
-            >
-              {deliveryBadge.label}
-            </div>
-          ) : null}
-        </div>
-
-        <div className="mt-4 rounded-[20px] bg-marva-50 p-4">
-          <p className="text-sm font-semibold text-marva-900">
-            Buyurtma mahsulotlari
-          </p>
-
-          {!order.order_items || order.order_items.length === 0 ? (
-            <p className="mt-2 text-sm text-marva-700/70">Mahsulotlar topilmadi</p>
-          ) : (
-            <div className="mt-3 space-y-2">
-              {order.order_items.map((item) => (
-                <div
-                  key={item.id}
-                  className="flex items-start justify-between gap-3 rounded-2xl bg-white px-4 py-3"
-                >
-                  <div>
-                    <p className="text-sm font-semibold text-marva-900">
-                      {item.product_name}
-                    </p>
-                    <p className="mt-1 text-xs text-marva-700/70">
-                      Soni: {item.quantity}
-                    </p>
-                  </div>
-
-                  <div className="text-right">
-                    <p className="text-sm font-semibold text-marva-900">
-                      {formatPrice(item.price)}
-                    </p>
-                    <p className="mt-1 text-xs text-marva-700/70">
-                      Jami: {formatPrice(item.price * item.quantity)}
-                    </p>
-                  </div>
-                </div>
-              ))}
-            </div>
-          )}
-        </div>
-
-        <div className="mt-4 grid gap-3">
-          <div>
-            <label className="mb-2 block text-sm font-medium text-marva-900">
-              Buyurtma statusi
-            </label>
-            <select
-              value={order.order_status}
-              onChange={async (e) => {
-                const value = e.target.value;
-                const updated = await updateOrderByApi(order.id, {
-                  order_status: value,
-                });
-                if (!updated) return;
-                await loadOrders();
-              }}
-              className="w-full rounded-2xl border border-marva-100 px-4 py-3 outline-none"
-            >
-              <option value="Yangi">Yangi</option>
-              <option value="Tasdiqlandi">Tasdiqlandi</option>
-              <option value="Tayyorlanmoqda">Tayyorlanmoqda</option>
-              <option value="Upakovka qilindi">Upakovka qilindi</option>
-              <option value="Kuryerga topshirildi">Kuryerga topshirildi</option>
-              <option value="Yetkazildi">Yetkazildi</option>
-              <option value="Bekor qilindi">Bekor qilindi</option>
-            </select>
-          </div>
-
-          <div>
-            <label className="mb-2 block text-sm font-medium text-marva-900">
-              Dostavka statusi
-            </label>
-            <select
-              value={order.delivery_status}
-              onChange={async (e) => {
-                const value = e.target.value;
-                const updated = await updateOrderByApi(order.id, {
-                  delivery_status: value,
-                });
-                if (!updated) return;
-                await loadOrders();
-              }}
-              className="w-full rounded-2xl border border-marva-100 px-4 py-3 outline-none"
-            >
-              <option value="Dastavka biriktirilmagan">
-                Dastavka biriktirilmagan
-              </option>
-              <option value="Dastavkaga berildi">Dastavkaga berildi</option>
-              <option value="Yo‘lda">Yo‘lda</option>
-              <option value="Yetkazib berdi">Yetkazib berdi</option>
-              <option value="Yetkazib bera olmadi">Yetkazib bera olmadi</option>
-            </select>
-          </div>
-
-          <div>
-            <label className="mb-2 block text-sm font-medium text-marva-900">
-              Kuryer ismi
-            </label>
-            <input
-              value={draft.courier_name}
-              onChange={(e) =>
-                setCourierDraftField(order.id, "courier_name", e.target.value)
-              }
-              onBlur={() => saveCourierDraft(order.id)}
-              placeholder="Masalan: Jasur"
-              disabled={courierAlreadySent}
-              className="w-full rounded-2xl border border-marva-100 px-4 py-3 outline-none disabled:bg-slate-50 disabled:text-slate-400"
-            />
-          </div>
-
-          <div>
-            <label className="mb-2 block text-sm font-medium text-marva-900">
-              Kuryer telefoni
-            </label>
-            <input
-              value={draft.courier_phone}
-              onChange={(e) =>
-                setCourierDraftField(order.id, "courier_phone", e.target.value)
-              }
-              onBlur={() => saveCourierDraft(order.id)}
-              placeholder="+998 90 123 45 67"
-              disabled={courierAlreadySent}
-              className="w-full rounded-2xl border border-marva-100 px-4 py-3 outline-none disabled:bg-slate-50 disabled:text-slate-400"
-            />
-          </div>
-
-          <div>
-            <label className="mb-2 block text-sm font-medium text-marva-900">
-              Qayerdan olib ketadi
-            </label>
-            <input
-              value={draft.pickup_point}
-              onChange={(e) =>
-                setCourierDraftField(order.id, "pickup_point", e.target.value)
-              }
-              onBlur={() => saveCourierDraft(order.id)}
-              placeholder="Masalan: MARVA ombori, Chilonzor"
-              disabled={courierAlreadySent}
-              className="w-full rounded-2xl border border-marva-100 px-4 py-3 outline-none disabled:bg-slate-50 disabled:text-slate-400"
-            />
-          </div>
-
-          <div>
-            <label className="mb-2 block text-sm font-medium text-marva-900">
-              Dastavka izohi
-            </label>
-            <textarea
-              value={draft.delivery_note}
-              onChange={(e) =>
-                setCourierDraftField(order.id, "delivery_note", e.target.value)
-              }
-              onBlur={() => saveCourierDraft(order.id)}
-              placeholder="Masalan: oldin telefon qilsin, 2-qavat, klinika kirish eshigi yonida"
-              rows={3}
-              disabled={courierAlreadySent}
-              className="w-full rounded-2xl border border-marva-100 px-4 py-3 outline-none disabled:bg-slate-50 disabled:text-slate-400"
-            />
-          </div>
-
-          <div className="grid grid-cols-2 gap-3">
-            <button
-              onClick={() => assignToCourier(order)}
-              disabled={isSending || courierAlreadySent}
-              className="rounded-2xl bg-marva-700 px-4 py-3 font-semibold text-white disabled:opacity-50"
-            >
-              {isSending
-                ? "Yuborilmoqda..."
-                : courierAlreadySent
-                ? "Yuborildi"
-                : "Kuryerga berish"}
-            </button>
-
-            <button
-              onClick={() => markAsDelivered(order)}
-              className="rounded-2xl bg-green-600 px-4 py-3 font-semibold text-white"
-            >
-              Yetkazildi
-            </button>
-          </div>
-        </div>
-      </div>
-    );
-  };
-
-  const renderSection = (title: string, list: OrderItem[]) => {
-    if (list.length === 0) return null;
-
-    return (
-      <div className="space-y-4">
-        <div className="rounded-[24px] bg-white p-4 shadow-soft">
-          <h2 className="text-lg font-bold text-marva-900">{title}</h2>
-          <p className="mt-1 text-sm text-marva-700/70">{list.length} ta buyurtma</p>
-        </div>
-        {list.map(renderOrderCard)}
-      </div>
-    );
-  };
-
   return (
     <div className="min-h-screen bg-[linear-gradient(180deg,#F7FAF9_0%,#EEF3F1_55%,#E8EFED_100%)] pb-28">
       <Header />
 
-      <Container className="py-5 space-y-5">
+      <Container className="space-y-5 py-5">
         <div className="rounded-[28px] bg-white p-5 shadow-soft">
           <h1 className="text-2xl font-bold text-marva-900">Buyurtmalar</h1>
           <p className="mt-1 text-sm text-marva-700/70">
@@ -702,10 +446,265 @@ export default function AdminOrdersPage() {
             Hali buyurtma yo‘q
           </div>
         ) : (
-          <div className="space-y-8">
-            {renderSection("Yangi buyurtmalar", newOrders)}
-            {renderSection("Kuryerdagi buyurtmalar", courierOrders)}
-            {renderSection("Yakunlangan buyurtmalar", finishedOrders)}
+          <div className="space-y-4">
+            {orders.map((order) => {
+              const draft = courierDrafts[order.id] || {
+                courier_name: "",
+                courier_phone: "",
+                pickup_point: "",
+                delivery_note: "",
+              };
+
+              const isSending = sendingOrderId === order.id;
+              const courierAlreadySent = isCourierAlreadySent(order);
+              const deliveryBadge = getDeliveryBadge(order.delivery_status);
+              const orderBadge = getOrderBadge(order.order_status);
+
+              return (
+                <div
+                  key={order.id}
+                  className="rounded-[24px] bg-white p-5 shadow-soft"
+                >
+                  <div className="flex items-start justify-between gap-3">
+                    <div>
+                      <p className="text-lg font-bold text-marva-900">
+                        #{order.id} — {order.full_name}
+                      </p>
+                      <p className="mt-1 text-sm text-marva-700/80">{order.phone}</p>
+                      <p className="mt-1 text-sm text-marva-700/80">{order.address}</p>
+                      {order.note ? (
+                        <p className="mt-2 text-sm text-marva-700/80">
+                          Mijoz izohi: {order.note}
+                        </p>
+                      ) : null}
+                    </div>
+
+                    <div className="text-right">
+                      <p className="text-xl font-bold text-marva-900">
+                        {formatPrice(order.total_amount)}
+                      </p>
+                    </div>
+                  </div>
+
+                  <div className="mt-3 flex flex-wrap gap-2">
+                    {orderBadge ? (
+                      <div
+                        className={`inline-flex items-center rounded-full px-3 py-1 text-xs font-semibold ${orderBadge.className}`}
+                      >
+                        {orderBadge.label}
+                      </div>
+                    ) : null}
+
+                    {deliveryBadge ? (
+                      <div
+                        className={`inline-flex items-center rounded-full px-3 py-1 text-xs font-semibold ${deliveryBadge.className}`}
+                      >
+                        {deliveryBadge.label}
+                      </div>
+                    ) : null}
+                  </div>
+
+                  <div className="mt-4 rounded-[20px] bg-marva-50 p-4">
+                    <p className="text-sm font-semibold text-marva-900">
+                      Buyurtma mahsulotlari
+                    </p>
+
+                    {!order.order_items || order.order_items.length === 0 ? (
+                      <p className="mt-2 text-sm text-marva-700/70">
+                        Mahsulotlar topilmadi
+                      </p>
+                    ) : (
+                      <div className="mt-3 space-y-2">
+                        {order.order_items.map((item) => (
+                          <div
+                            key={item.id}
+                            className="flex items-start justify-between gap-3 rounded-2xl bg-white px-4 py-3"
+                          >
+                            <div>
+                              <p className="text-sm font-semibold text-marva-900">
+                                {item.product_name}
+                              </p>
+                              <p className="mt-1 text-xs text-marva-700/70">
+                                Soni: {item.quantity}
+                              </p>
+                            </div>
+
+                            <div className="text-right">
+                              <p className="text-sm font-semibold text-marva-900">
+                                {formatPrice(item.price)}
+                              </p>
+                              <p className="mt-1 text-xs text-marva-700/70">
+                                Jami: {formatPrice(item.price * item.quantity)}
+                              </p>
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+
+                  <div className="mt-4 grid gap-3">
+                    <div>
+                      <label className="mb-2 block text-sm font-medium text-marva-900">
+                        Buyurtma statusi
+                      </label>
+                      <select
+                        value={order.order_status}
+                        onChange={async (e) => {
+                          const value = e.target.value;
+
+                          const updated = await updateOrderByApi(order.id, {
+                            order_status: value,
+                          });
+
+                          if (!updated) return;
+
+                          setOrders((prev) =>
+                            prev.map((item) =>
+                              item.id === order.id
+                                ? { ...item, order_status: value }
+                                : item
+                            )
+                          );
+                        }}
+                        className="w-full rounded-2xl border border-marva-100 px-4 py-3 outline-none"
+                      >
+                        <option value="Yangi">Yangi</option>
+                        <option value="Tasdiqlandi">Tasdiqlandi</option>
+                        <option value="Tayyorlanmoqda">Tayyorlanmoqda</option>
+                        <option value="Upakovka qilindi">Upakovka qilindi</option>
+                        <option value="Kuryerga topshirildi">Kuryerga topshirildi</option>
+                        <option value="Yetkazildi">Yetkazildi</option>
+                        <option value="Bekor qilindi">Bekor qilindi</option>
+                      </select>
+                    </div>
+
+                    <div>
+                      <label className="mb-2 block text-sm font-medium text-marva-900">
+                        Dostavka statusi
+                      </label>
+                      <select
+                        value={order.delivery_status}
+                        onChange={async (e) => {
+                          const value = e.target.value;
+
+                          const updated = await updateOrderByApi(order.id, {
+                            delivery_status: value,
+                          });
+
+                          if (!updated) return;
+
+                          setOrders((prev) =>
+                            prev.map((item) =>
+                              item.id === order.id
+                                ? { ...item, delivery_status: value }
+                                : item
+                            )
+                          );
+                        }}
+                        className="w-full rounded-2xl border border-marva-100 px-4 py-3 outline-none"
+                      >
+                        <option value="Dastavka biriktirilmagan">
+                          Dastavka biriktirilmagan
+                        </option>
+                        <option value="Dastavkaga berildi">Dastavkaga berildi</option>
+                        <option value="Yo‘lda">Yo‘lda</option>
+                        <option value="Yetkazib berdi">Yetkazib berdi</option>
+                        <option value="Yetkazib bera olmadi">
+                          Yetkazib bera olmadi
+                        </option>
+                      </select>
+                    </div>
+
+                    <div>
+                      <label className="mb-2 block text-sm font-medium text-marva-900">
+                        Kuryer ismi
+                      </label>
+                      <input
+                        value={draft.courier_name}
+                        onChange={(e) =>
+                          setCourierDraftField(order.id, "courier_name", e.target.value)
+                        }
+                        onBlur={() => saveCourierDraft(order.id)}
+                        placeholder="Masalan: Jasur"
+                        disabled={courierAlreadySent}
+                        className="w-full rounded-2xl border border-marva-100 px-4 py-3 outline-none disabled:bg-slate-50 disabled:text-slate-400"
+                      />
+                    </div>
+
+                    <div>
+                      <label className="mb-2 block text-sm font-medium text-marva-900">
+                        Kuryer telefoni
+                      </label>
+                      <input
+                        value={draft.courier_phone}
+                        onChange={(e) =>
+                          setCourierDraftField(order.id, "courier_phone", e.target.value)
+                        }
+                        onBlur={() => saveCourierDraft(order.id)}
+                        placeholder="+998 90 123 45 67"
+                        disabled={courierAlreadySent}
+                        className="w-full rounded-2xl border border-marva-100 px-4 py-3 outline-none disabled:bg-slate-50 disabled:text-slate-400"
+                      />
+                    </div>
+
+                    <div>
+                      <label className="mb-2 block text-sm font-medium text-marva-900">
+                        Qayerdan olib ketadi
+                      </label>
+                      <input
+                        value={draft.pickup_point}
+                        onChange={(e) =>
+                          setCourierDraftField(order.id, "pickup_point", e.target.value)
+                        }
+                        onBlur={() => saveCourierDraft(order.id)}
+                        placeholder="Masalan: MARVA ombori, Chilonzor"
+                        disabled={courierAlreadySent}
+                        className="w-full rounded-2xl border border-marva-100 px-4 py-3 outline-none disabled:bg-slate-50 disabled:text-slate-400"
+                      />
+                    </div>
+
+                    <div>
+                      <label className="mb-2 block text-sm font-medium text-marva-900">
+                        Dastavka izohi
+                      </label>
+                      <textarea
+                        value={draft.delivery_note}
+                        onChange={(e) =>
+                          setCourierDraftField(order.id, "delivery_note", e.target.value)
+                        }
+                        onBlur={() => saveCourierDraft(order.id)}
+                        placeholder="Masalan: oldin telefon qilsin, 2-qavat, klinika kirish eshigi yonida"
+                        rows={3}
+                        disabled={courierAlreadySent}
+                        className="w-full rounded-2xl border border-marva-100 px-4 py-3 outline-none disabled:bg-slate-50 disabled:text-slate-400"
+                      />
+                    </div>
+
+                    <div className="grid grid-cols-2 gap-3">
+                      <button
+                        onClick={() => assignToCourier(order)}
+                        disabled={isSending || courierAlreadySent}
+                        className="rounded-2xl bg-marva-700 px-4 py-3 font-semibold text-white disabled:opacity-50"
+                      >
+                        {isSending
+                          ? "Yuborilmoqda..."
+                          : courierAlreadySent
+                          ? "Yuborildi"
+                          : "Kuryerga berish"}
+                      </button>
+
+                      <button
+                        onClick={() => markAsDelivered(order)}
+                        className="rounded-2xl bg-green-600 px-4 py-3 font-semibold text-white"
+                      >
+                        Yetkazildi
+                      </button>
+                    </div>
+                  </div>
+                </div>
+              );
+            })}
           </div>
         )}
       </Container>

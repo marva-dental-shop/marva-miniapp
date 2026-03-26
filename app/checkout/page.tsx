@@ -17,6 +17,49 @@ type SavedUser = {
   telegramId?: string | number | null;
 };
 
+type LocalOrderItem = {
+  id?: string | number;
+  name: string;
+  price: number;
+  quantity: number;
+  image?: string;
+};
+
+type LocalSavedOrder = {
+  id: string;
+  createdAt: string;
+  status: "new" | "processing" | "delivered" | "cancelled";
+  total: number;
+  items: LocalOrderItem[];
+  address?: string;
+  paymentMethod?: string;
+  userKey: string;
+  telegramId?: string | number | null;
+  phone?: string;
+};
+
+function getOrderUserKey(user: SavedUser) {
+  if (user.telegramId) return `tg:${user.telegramId}`;
+  if (user.phone) return `phone:${user.phone}`;
+  if (user.id) return `id:${user.id}`;
+  return "guest";
+}
+
+function saveOrderToLocalStorage(order: LocalSavedOrder) {
+  try {
+    const saved = localStorage.getItem("marva-orders");
+    const parsed = saved ? JSON.parse(saved) : [];
+    const currentOrders = Array.isArray(parsed) ? parsed : [];
+
+    localStorage.setItem(
+      "marva-orders",
+      JSON.stringify([order, ...currentOrders])
+    );
+  } catch (error) {
+    console.error("Order localStorage save error:", error);
+  }
+}
+
 export default function CheckoutPage() {
   const router = useRouter();
   const { items, clear } = useCartStore();
@@ -145,6 +188,27 @@ export default function CheckoutPage() {
       } catch (error) {
         console.error("Admin telegramga yuborishda xato:", error);
       }
+
+      const localOrder: LocalSavedOrder = {
+        id: String(order.id),
+        createdAt: new Date().toISOString(),
+        status: "new",
+        total,
+        address: finalAddress,
+        paymentMethod: "Operator bilan tasdiqlanadi",
+        userKey: getOrderUserKey(savedUser),
+        telegramId: savedUser.telegramId ?? null,
+        phone: savedUser.phone,
+        items: items.map((item) => ({
+          id: item.product.id,
+          name: item.product.name,
+          price: item.product.price,
+          quantity: item.quantity,
+          image: item.product.image || "",
+        })),
+      };
+
+      saveOrderToLocalStorage(localOrder);
 
       clear();
       setDone(true);
